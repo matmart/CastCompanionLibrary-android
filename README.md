@@ -3,25 +3,37 @@
 CastCompanionLibrary-android is a library project to enable developers integrate Cast capabilities into their applications faster and easier.
 
 ## Dependencies
-* google-play-services_lib library from the Android SDK (at least version 8.3+)
-* android-support-v7-appcompat (version 23.1.1 or above)
-* android-support-v7-mediarouter (version 23.1.1 or above)
+* google-play-services_lib library from the Android SDK (at least version 9.8.+)
+* android-support-v7-appcompat (version 25.0.0 or above)
+* android-support-v7-mediarouter (version 25.0.0 or above)
 
-## Setup Instructions
-Set up the project dependencies. To use this library in your project, follow these steps:
+## Set up Instructions
+Set up the project dependencies. To use this library in your project, you have two options:
+
+(1) Add this library from jCenter repo by adding the following line to your project's
+dependencies:
+```shell
+ dependencies {
+    ...
+    compile 'com.google.android.libraries.cast.companionlibrary:ccl:2.9.1'
+ }
+```
+
+(2) Use the GitHub source and include that as a module dependency by following these steps:
  * Clone this library into a project named CastCompanionLibrary, parallel to your own application project:
 ```shell
 git clone https://github.com/googlecast/CastCompanionLibrary-android.git CastCompanionLibrary
 ```
- * In the root of your application's project edit the file "settings.gradle" and add a new "include" line:
+ * In the root of your application's project edit the file "settings.gradle" and add the following lines:
 ```shell
-include '..:CastCompanionLibrary'
+include ':CastCompanionLibrary'
+project(':CastCompanionLibrary').projectDir = new File('../CastCompanionLibrary/')
 ```
  * In your application's main module (usually called "app"), edit your build.gradle to add a new dependency:
 ```shell
  dependencies {
     ...
-    compile project(':..:CastCompanionLibrary')
+    compile project(':CastCompanionLibrary')
  }
 ```
 Now your project is ready to use this library
@@ -29,9 +41,9 @@ Now your project is ready to use this library
 ## Documentation and Demo
 See the "CastCompanionLibrary.pdf" inside the project for a more extensive documentation. The
 [CastVideos-android](https://github.com/googlecast/CastVideos-android) reference sample app uses this library and
-can also be used to understand how this library can be used in a real application.
+demonstrates how this library can be used in a real application.
 
-## References and How to report bugs
+## References and how to report bugs
 * [Cast Developer Documentation](http://developers.google.com/cast/)
 * [Design Checklist](http://developers.google.com/cast/docs/design_checklist)
 * If you find any issues with this library, please open a bug here on GitHub
@@ -43,10 +55,82 @@ Please read and follow the steps in the CONTRIBUTING.md
 ## License
 See LICENSE
 
+## Terms
+Your use of this sample is subject to, and by using or downloading the sample files you agree to comply with, the [Google APIs Terms of Service](https://developers.google.com/terms/) and the [Google Cast SDK Additional Developer Terms of Service](https://developers.google.com/cast/docs/terms/).
+
 ## Google+
 Google Cast Developers Community on Google+ [http://goo.gl/TPLDxj](http://goo.gl/TPLDxj)
 
 ## Change List
+
+2.9.1 (bug fix release)
+ * Changed dependency on Cast SDK to 9.8.0 from 9.8.00
+
+2.9.0 (bug fix release)
+
+ * Addressed the following issues: #322, #324, #326
+ * Updated to the latest versions of Cast SDK and support libraries.
+
+2.8.4 (bug fix release)
+
+ * Addressed the following issues: #287, #294, #298, #301, #309
+ * Enabling debug through CastConfiguration now enables logging through LogUtils as well.
+
+2.8.3 (available here and also from jCenter)
+
+ * Updated support libraries to version 23.2.1, this addresses the crash issue on KitKat when IntroductoryOverlay is used (see issue #278)
+ * Fixing an issue where InputStreams were not properly closed in FetchBitmapTask (credit goes to David Edwards)
+ * Fixing an issue where failure to load a media in a queue was not closing the full screen VideoCastControllerActivity (credit goes to Luzian Wild)
+ * Correcting some typos
+
+2.8.2 (available here and also from jCenter)
+
+ * BACKWARD INCOMPATIBLE CHANGE: Removed Simple Widgets that were introduced in 2.8.0
+ * Updated support libraries to version 23.2.0
+
+2.8.1 (available here and also from jCenter)
+
+ * Fixed issue #274
+
+2.8.0 (available here and also from jCenter)
+
+ * CCL is now available from jCenter
+ * Introduced a collection of Simple Widgets: a number of cast-aware widgets that can be used with
+ no additional setup, managed by CCL.
+ * Changed the callback BaseCastConsumer.onDeviceSelected(CastDevice) to
+ BaseCastConsumer.onDeviceSelected(CastDevice, RouteInfo) to provide more information in the callback.
+ * Added a new callback BaseCastConsumer.onRouteRemoved(RouteInfo) to be called when a route is removed.
+ * Fixed #272 and a number of other minor issues.
+ * In their manifests, clients no longer need to add any "intent-filters" to the services and the receiver that CCL provides,
+ this enhances the security of the client applications.
+ * Updated the documentation.
+
+2.7.4
+
+ * Fixed issue #269 where an unwanted scaling of a bitmap was resulting in reduced quality.
+
+2.7.3
+
+ * Added a configuration parameter to allow clients define their own MediaRouteDialogFactory. As a result,
+ the protected method "getMediaRouteDialogFactory()" has been removed from the VideoCastManager and DataCastManager.
+ If you were previously using this method, please update your code to use the CastConfiguration object
+ to achieve the same.
+
+2.7.2
+
+ * Now in the full-screen cast controller (VideoCastControllerActivity) and on lockscreen, images are
+ appropriately scaled down before being fetched, to avoid undesired OOM on devices with less memory.
+ * Fixed a couple of minor issues in the PDF documentation.
+
+2.7.1
+
+ * Added a full-screen overlay for clients to introduce cast to users. This removes the
+ need to use any additional libraries for this purpose. Look at the javadoc for IntroductoryOverlay class for
+ the supported features, styling and customization of this view. For a working example, take a look at the
+ [CastVideos-android](https://github.com/googlecast/CastVideos-android) reference sample app.
+ * Fixed #256 (thanks to [curlyfrie](https://github.com/curlyfrie) for making the suggestion).
+ * Updated to the latest Play Service library (v8.4.0).
+ * Documentation has been updated to reflect the new changes.
 
 2.7.0
 

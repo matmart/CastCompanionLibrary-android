@@ -57,6 +57,7 @@ import com.google.android.libraries.cast.companionlibrary.utils.Utils;
 import com.google.android.libraries.cast.companionlibrary.widgets.IMiniController;
 import com.google.android.libraries.cast.companionlibrary.widgets.MiniController;
 import com.google.android.libraries.cast.companionlibrary.widgets.MiniController.OnMiniControllerChangedListener;
+import com.google.android.libraries.cast.companionlibrary.widgets.ProgressWatcher;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
@@ -68,6 +69,7 @@ import android.content.Intent;
 import android.content.res.Resources.NotFoundException;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Point;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
@@ -77,7 +79,6 @@ import android.support.annotation.NonNull;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
-import android.support.v7.app.MediaRouteDialogFactory;
 import android.support.v7.media.MediaRouter.RouteInfo;
 import android.text.TextUtils;
 import android.view.KeyEvent;
@@ -92,10 +93,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -126,7 +128,6 @@ import java.util.concurrent.TimeUnit;
  *
  * @see CastConfiguration
  */
-@SuppressWarnings("unused")
 public class VideoCastManager extends BaseCastManager
         implements OnMiniControllerChangedListener, OnFailedListener {
 
@@ -147,8 +148,6 @@ public class VideoCastManager extends BaseCastManager
     private TracksPreferenceManager mTrackManager;
     private MediaQueue mMediaQueue;
     private MediaStatus mMediaStatus;
-    private Timer mProgressTimer;
-    private UpdateProgressTask mProgressTask;
     private FetchBitmapTask mLockScreenFetchTask;
     private FetchBitmapTask mMediaSessionIconFetchTask;
 
@@ -178,9 +177,12 @@ public class VideoCastManager extends BaseCastManager
     private final Set<VideoCastConsumer> mVideoConsumers = new CopyOnWriteArraySet<>();
     private final Set<OnTracksSelectedListener> mTracksSelectedListeners =
             new CopyOnWriteArraySet<>();
+    private final Set<ProgressWatcher> mProgressWatchers = new CopyOnWriteArraySet<>();
     private MediaAuthService mAuthService;
     private long mLiveStreamDuration = DEFAULT_LIVE_STREAM_DURATION_MS;
     private MediaQueueItem mPreLoadingItem;
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    private ScheduledFuture<?> mProgressHandler;
 
     public static final int QUEUE_OPERATION_LOAD = 1;
     public static final int QUEUE_OPERATION_INSERT_ITEMS = 2;
@@ -239,7 +241,6 @@ public class VideoCastManager extends BaseCastManager
                 LOGE(TAG, msg);
             }
             sInstance = new VideoCastManager(context, castConfiguration);
-            sInstance.restartProgressTimer();
         }
         sInstance.setupTrackManager();
         return sInstance;
@@ -829,7 +830,7 @@ public class VideoCastManager extends BaseCastManager
                 mMediaRouter.selectRoute(mMediaRouter.getDefaultRoute());
             }
         }
-        onDeviceSelected(null);
+        onDeviceSelected(null /* CastDevice */, null /* RouteInfo */);
         updateMiniControllersVisibility(false);
         stopNotificationService();
     }
@@ -951,13 +952,13 @@ public class VideoCastManager extends BaseCastManager
                 // while trying to re-establish session, we found out that the app is not running
                 // so we need to disconnect
                 mReconnectionStatus = RECONNECTION_STATUS_INACTIVE;
-                onDeviceSelected(null);
+                onDeviceSelected(null /* CastDevice */, null /* RouteInfo */);
             }
         } else {
             for (VideoCastConsumer consumer : mVideoConsumers) {
                 consumer.onApplicationConnectionFailed(errorCode);
             }
-            onDeviceSelected(null);
+            onDeviceSelected(null /* CastDevice */, null /* RouteInfo */);
             if (mMediaRouter != null) {
                 LOGD(TAG, "onApplicationConnectionFailed(): Setting route to default");
                 mMediaRouter.selectRoute(mMediaRouter.getDefaultRoute());
@@ -1839,12 +1840,10 @@ public class VideoCastManager extends BaseCastManager
 
                         @Override
                         public void onQueueStatusUpdated() {
-                            LOGD(TAG,
-                                    "RemoteMediaPlayer::onQueueStatusUpdated() is "
-                                            + "reached");
-                            mMediaStatus = mRemoteMediaPlayer.getMediaStatus();
-                            if (mMediaStatus != null
-                                    && mMediaStatus.getQueueItems() != null) {
+                            LOGD(TAG, "RemoteMediaPlayer::onQueueStatusUpdated() is reached");
+                            mMediaStatus = mRemoteMediaPlayer != null ? mRemoteMediaPlayer
+                                    .getMediaStatus() : null;
+                            if (mMediaStatus != null && mMediaStatus.getQueueItems() != null) {
                                 List<MediaQueueItem> queueItems = mMediaStatus
                                         .getQueueItems();
                                 int itemId = mMediaStatus.getCurrentItemId();
@@ -2133,7 +2132,8 @@ public class VideoCastManager extends BaseCastManager
 
     private void onRemoteMediaPreloadStatusUpdated() {
         MediaQueueItem item = null;
-        mMediaStatus = mRemoteMediaPlayer.getMediaStatus();
+        mMediaStatus = mRemoteMediaPlayer != null ? mRemoteMediaPlayer
+                                    .getMediaStatus() : null;
         if (mMediaStatus != null) {
             item = mMediaStatus.getQueueItemById(mMediaStatus.getPreloadedItemId());
         }
@@ -2335,10 +2335,11 @@ public class VideoCastManager extends BaseCastManager
             if (mLockScreenFetchTask != null) {
                 mLockScreenFetchTask.cancel(true);
             }
-            mLockScreenFetchTask = new FetchBitmapTask() {
+            Point screenSize = Utils.getDisplaySize(mContext);
+            mLockScreenFetchTask = new FetchBitmapTask(screenSize.x, screenSize.y, false) {
                 @Override
                 protected void onPostExecute(Bitmap bitmap) {
-                    if (mMediaSessionCompat != null) {
+                    if (bitmap != null && mMediaSessionCompat != null) {
                         MediaMetadataCompat currentMetadata = mMediaSessionCompat.getController()
                                 .getMetadata();
                         MediaMetadataCompat.Builder newBuilder = currentMetadata == null
@@ -2439,7 +2440,7 @@ public class VideoCastManager extends BaseCastManager
                 mMediaSessionIconFetchTask = new FetchBitmapTask() {
                     @Override
                     protected void onPostExecute(Bitmap bitmap) {
-                        if (mMediaSessionCompat != null) {
+                        if (bitmap != null && mMediaSessionCompat != null) {
                             MediaMetadataCompat currentMetadata = mMediaSessionCompat
                                     .getController().getMetadata();
                             MediaMetadataCompat.Builder newBuilder = currentMetadata == null
@@ -2513,6 +2514,18 @@ public class VideoCastManager extends BaseCastManager
         }
     }
 
+    public synchronized void addProgressWatcher(ProgressWatcher watcher) {
+        if (watcher != null) {
+            mProgressWatchers.add(watcher);
+        }
+    }
+
+    public synchronized void removeProgressWatcher(ProgressWatcher watcher) {
+        if (watcher != null) {
+            mProgressWatchers.remove(watcher);
+        }
+    }
+
     /**
      * Adds a new {@link IMiniController} component. Callers need to provide their own
      * {@link OnMiniControllerChangedListener}.
@@ -2542,6 +2555,9 @@ public class VideoCastManager extends BaseCastManager
                 LOGD(TAG, "Attempting to adding " + miniController + " but it was already "
                         + "registered, skipping this step");
             }
+            if (mProgressHandler == null || mProgressHandler.isCancelled()) {
+                restartProgressTimer();
+            }
         }
     }
 
@@ -2561,6 +2577,9 @@ public class VideoCastManager extends BaseCastManager
             listener.setOnMiniControllerChangedListener(null);
             synchronized (mMiniControllers) {
                 mMiniControllers.remove(listener);
+                if (mMiniControllers.isEmpty()) {
+                    stopProgressTimer();
+                }
             }
         }
     }
@@ -2571,6 +2590,7 @@ public class VideoCastManager extends BaseCastManager
         detachMediaChannel();
         removeDataChannel();
         mState = MediaStatus.PLAYER_STATE_IDLE;
+        mMediaStatus = null;
     }
 
     @Override
@@ -2586,6 +2606,8 @@ public class VideoCastManager extends BaseCastManager
     public void onConnectionFailed(ConnectionResult result) {
         super.onConnectionFailed(result);
         updateMediaSession(false);
+        mState = MediaStatus.PLAYER_STATE_IDLE;
+        mMediaStatus = null;
         stopNotificationService();
     }
 
@@ -2598,15 +2620,8 @@ public class VideoCastManager extends BaseCastManager
             clearMediaSession();
         }
         mState = MediaStatus.PLAYER_STATE_IDLE;
+        mMediaStatus = null;
         mMediaQueue = null;
-    }
-
-    @Override
-    protected MediaRouteDialogFactory getMediaRouteDialogFactory() {
-        // you can return "new VideoMediaRouteDialogFactory()" if interested in the custom
-        // dialog defined in this library; recent versions of the dialogs provided by the
-        // support library follow the UX guideline.
-        return null;
     }
 
     class CastListener extends Cast.Listener {
@@ -2733,6 +2748,25 @@ public class VideoCastManager extends BaseCastManager
      */
     public void setLiveStreamDuration(long duration) {
         mLiveStreamDuration = duration;
+    }
+
+    /**
+     * Sets the active tracks and their styles.
+     */
+    public void setActiveTracks(List<MediaTrack> tracks) {
+        long[] tracksArray;
+        if (tracks.isEmpty()) {
+            tracksArray = new long[]{};
+        } else {
+            tracksArray = new long[tracks.size()];
+            for (int i = 0; i < tracks.size(); i++) {
+                tracksArray[i] = tracks.get(i).getId();
+            }
+        }
+        setActiveTrackIds(tracksArray);
+        if (tracks.size() > 0) {
+            setTextTrackStyle(getTracksPreferenceManager().getTextTrackStyle());
+        }
     }
 
     /**
@@ -2921,7 +2955,8 @@ public class VideoCastManager extends BaseCastManager
     /**
      * Notifies all the
      * {@link com.google.android.libraries.cast.companionlibrary.cast.tracks.OnTracksSelectedListener} // NOLINT
-     * that the set of active tracks has changed.
+     * that the set of active tracks has changed. If there are no listeners registered, then the
+     * cast manager sets that itself.
      *
      * @param tracks the set of active tracks. Must be {@code non-null} but can be an empty list.
      */
@@ -2929,8 +2964,12 @@ public class VideoCastManager extends BaseCastManager
         if (tracks == null) {
             throw new IllegalArgumentException("tracks must not be null");
         }
-        for (OnTracksSelectedListener listener : mTracksSelectedListeners) {
-            listener.onTracksSelected(tracks);
+        if (mTracksSelectedListeners.isEmpty()) {
+            setActiveTracks(tracks);
+        } else {
+            for (OnTracksSelectedListener listener : mTracksSelectedListeners) {
+                listener.onTracksSelected(tracks);
+            }
         }
     }
 
@@ -2938,28 +2977,7 @@ public class VideoCastManager extends BaseCastManager
         return mMediaQueue;
     }
 
-    private void stopProgressTimer() {
-        LOGD(TAG, "Stopped TrickPlay Timer");
-        if (mProgressTask != null) {
-            mProgressTask.cancel();
-            mProgressTask = null;
-        }
-        if (mProgressTimer != null) {
-            mProgressTimer.cancel();
-            mProgressTimer = null;
-        }
-    }
-
-    private void restartProgressTimer() {
-        stopProgressTimer();
-        mProgressTimer = new Timer();
-        mProgressTask = new UpdateProgressTask();
-        mProgressTimer.scheduleAtFixedRate(mProgressTask, 100, PROGRESS_UPDATE_INTERVAL_MS);
-        LOGD(TAG, "Restarted Progress Timer");
-    }
-
-    private class UpdateProgressTask extends TimerTask {
-
+    final private Runnable mProgressRunnable = new Runnable() {
         @Override
         public void run() {
             int currentPos;
@@ -2977,6 +2995,21 @@ public class VideoCastManager extends BaseCastManager
                 LOGE(TAG, "Failed to update the progress tracker due to network issues", e);
             }
         }
+    };
+
+    private void restartProgressTimer() {
+        stopProgressTimer();
+        mProgressHandler = scheduler
+                .scheduleAtFixedRate(mProgressRunnable, 100, PROGRESS_UPDATE_INTERVAL_MS,
+                        TimeUnit.MILLISECONDS);
+        LOGD(TAG, "Restarted Progress Timer");
+    }
+
+    private void stopProgressTimer() {
+        LOGD(TAG, "Stopped TrickPlay Timer");
+        if (mProgressHandler != null && !mProgressHandler.isCancelled()) {
+            mProgressHandler.cancel(true);
+        }
     }
 
     /**
@@ -2987,6 +3020,10 @@ public class VideoCastManager extends BaseCastManager
             for (final IMiniController controller : mMiniControllers) {
                 controller.setProgress(currentPosition, duration);
             }
+        }
+
+        for(ProgressWatcher watcher : mProgressWatchers) {
+            watcher.setProgress(currentPosition, duration);
         }
     }
 

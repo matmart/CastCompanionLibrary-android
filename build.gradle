@@ -38,13 +38,13 @@ ext {
 }
 
 android {
-    compileSdkVersion 25
-    buildToolsVersion "25.0.0"
+    compileSdkVersion project.sdkVersion.toInteger()
+    buildToolsVersion project.buildToolVersion
     publishNonDefault true
 
     defaultConfig {
         minSdkVersion 10
-        targetSdkVersion 25
+        targetSdkVersion project.sdkVersion.toInteger()
     }
 
     sourceSets {
@@ -70,7 +70,7 @@ android {
 
 
 dependencies {
-    compile "com.android.support:appcompat-v7:${supportLibVersion}"
-    compile "com.android.support:mediarouter-v7:${supportLibVersion}"
-    compile 'com.google.android.gms:play-services-cast:11.8.0'
+    compile "com.android.support:appcompat-v7:$project.supportVersion"
+    compile "com.android.support:mediarouter-v7:$project.supportVersion"
+    compile "com.google.android.gms:play-services-cast:$project.playServiceVersion"
 }

@@ -58,9 +58,8 @@ android {
     buildTypes {
         debug {
             libraryVariants.all { variant ->
-                variant.outputs.each { output ->
-                    output.outputFile = new File(output.outputFile.parent, output.outputFile.name.
-                            replace(".aar", "-${versionName}.aar"))
+                variant.outputs.all { output ->
+                    outputFileName = output.outputFile.name.replace(".aar", "-${versionName}.aar")
                 }
             }
         }
@@ -70,7 +69,7 @@ android {
 
 
 dependencies {
-    compile "com.android.support:appcompat-v7:$project.supportVersion"
-    compile "com.android.support:mediarouter-v7:$project.supportVersion"
-    compile "com.google.android.gms:play-services-cast:$project.playServicesVersion"
+    api "com.android.support:appcompat-v7:$project.supportVersion"
+    api "com.android.support:mediarouter-v7:$project.supportVersion"
+    api "com.google.android.gms:play-services-cast:$project.playServicesVersion"
 }
